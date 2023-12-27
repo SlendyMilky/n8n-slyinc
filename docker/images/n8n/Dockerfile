@@ -21,16 +21,16 @@ RUN set -eux; \
 	rm -rf /usr/local/lib/node_modules/n8n/node_modules/n8n-design-system && \
 	rm -rf /usr/local/lib/node_modules/n8n/node_modules/n8n-editor-ui/node_modules && \
 	find /usr/local/lib/node_modules/n8n -type f -name "*.ts" -o -name "*.js.map" -o -name "*.vue" | xargs rm -f && \
-	rm -rf /root/.npm \
-	apk add --no-cache ca-certificates nano tzdata curl ffmpeg py3-pip \
-	pip install pyrogram \
-	curl -Lo /usr/local/bin/youtube-dl https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-	chmod a+rx /usr/local/bin/youtube-dl \
-	mkdir /downloads \
-	chmod a+rw /downloads \
-	youtube-dl --version \
-	mkdir -p /.cache \
-	chmod 777 /.cache \
+	rm -rf /root/.npm && \
+	apk add --no-cache ca-certificates nano tzdata curl ffmpeg py3-pip && \
+	pip install pyrogram && \
+	curl -Lo /usr/local/bin/youtube-dl https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+	chmod a+rx /usr/local/bin/youtube-dl && \
+	mkdir /downloads && \
+	chmod a+rw /downloads && \
+	youtube-dl --version && \
+	mkdir -p /.cache && \
+	chmod 777 /.cache && \
 	npm install -g webtorrent-cli
 
 WORKDIR /downloads
