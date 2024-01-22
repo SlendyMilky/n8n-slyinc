@@ -1,12 +1,10 @@
-import { Service } from 'typedi';
 import { Response, NextFunction } from 'express';
 import { Get, Middleware, RestController } from '@/decorators';
 import type { WorkflowStatistics } from '@db/entities/WorkflowStatistics';
 import { StatisticsNames } from '@db/entities/WorkflowStatistics';
 import { SharedWorkflowRepository } from '@db/repositories/sharedWorkflow.repository';
 import { WorkflowStatisticsRepository } from '@db/repositories/workflowStatistics.repository';
-import { ExecutionRequest } from '@/requests';
-import { whereClause } from '@/UserManagement/UserManagementHelper';
+import { ExecutionRequest } from '@/executions/execution.request';
 import type { IWorkflowStatisticsDataLoaded } from '@/Interfaces';
 import { Logger } from '@/Logger';
 import { NotFoundError } from '@/errors/response-errors/not-found.error';
@@ -18,12 +16,11 @@ interface WorkflowStatisticsData<T> {
 	manualError: T;
 }
 
-@Service()
 @RestController('/workflow-stats')
 export class WorkflowStatisticsController {
 	constructor(
-		private sharedWorkflowRepository: SharedWorkflowRepository,
-		private workflowStatisticsRepository: WorkflowStatisticsRepository,
+		private readonly sharedWorkflowRepository: SharedWorkflowRepository,
+		private readonly workflowStatisticsRepository: WorkflowStatisticsRepository,
 		private readonly logger: Logger,
 	) {}
 
@@ -35,17 +32,10 @@ export class WorkflowStatisticsController {
 	async hasWorkflowAccess(req: ExecutionRequest.Get, res: Response, next: NextFunction) {
 		const { user } = req;
 		const workflowId = req.params.id;
-		const allowed = await this.sharedWorkflowRepository.exist({
-			relations: ['workflow'],
-			where: whereClause({
-				user,
-				globalScope: 'workflow:read',
-				entityType: 'workflow',
-				entityId: workflowId,
-			}),
-		});
 
-		if (allowed) {
+		const hasAccess = await this.sharedWorkflowRepository.hasAccess(workflowId, user);
+
+		if (hasAccess) {
 			next();
 		} else {
 			this.logger.verbose('User attempted to read a workflow without permissions', {
@@ -59,12 +49,12 @@ export class WorkflowStatisticsController {
 
 	@Get('/:id/counts/')
 	async getCounts(req: ExecutionRequest.Get): Promise<WorkflowStatisticsData<number>> {
-		return this.getData(req.params.id, 'count', 0);
+		return await this.getData(req.params.id, 'count', 0);
 	}
 
 	@Get('/:id/times/')
 	async getTimes(req: ExecutionRequest.Get): Promise<WorkflowStatisticsData<Date | null>> {
-		return this.getData(req.params.id, 'latestEvent', null);
+		return await this.getData(req.params.id, 'latestEvent', null);
 	}
 
 	@Get('/:id/data-loaded/')

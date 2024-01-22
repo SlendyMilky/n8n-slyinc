@@ -9,6 +9,7 @@ import type {
 	ILoadOptionsFunctions,
 	INodeExecutionData,
 	INodeProperties,
+	IPairedItemData,
 	IPollFunctions,
 	JsonObject,
 } from 'n8n-workflow';
@@ -860,12 +861,15 @@ export type FileRecord = {
 	};
 };
 // prettier-ignore
-export async function downloadFiles(this: IExecuteFunctions | IPollFunctions, records: FileRecord[]): Promise<INodeExecutionData[]> {
+export async function downloadFiles(this: IExecuteFunctions | IPollFunctions, records: FileRecord[], pairedItem?: IPairedItemData[]): Promise<INodeExecutionData[]> {
 
 	const elements: INodeExecutionData[] = [];
 	for (const record of records) {
 		const element: INodeExecutionData = { json: {}, binary: {} };
 		element.json = record as unknown as IDataObject;
+		if (pairedItem) {
+			element.pairedItems = pairedItem;
+		}
 		for (const key of Object.keys(record.properties)) {
 			if (record.properties[key].type === 'files') {
 				if (record.properties[key].files.length) {
@@ -892,7 +896,7 @@ export async function downloadFiles(this: IExecuteFunctions | IPollFunctions, re
 	return elements;
 }
 
-export function extractPageId(page: string) {
+export function extractPageId(page = '') {
 	if (page.includes('p=')) {
 		return page.split('p=')[1];
 	} else if (page.includes('-') && page.includes('https')) {

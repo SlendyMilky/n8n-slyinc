@@ -30,6 +30,7 @@ import { UserManagementMailer } from '@/UserManagement/email';
 import type { CommunityPackagesService } from '@/services/communityPackages.service';
 import { Logger } from '@/Logger';
 import { UrlService } from './url.service';
+import { InternalHooks } from '@/InternalHooks';
 
 @Service()
 export class FrontendService {
@@ -46,8 +47,9 @@ export class FrontendService {
 		private readonly mailer: UserManagementMailer,
 		private readonly instanceSettings: InstanceSettings,
 		private readonly urlService: UrlService,
+		private readonly internalHooks: InternalHooks,
 	) {
-		loadNodesAndCredentials.addPostProcessor(async () => this.generateTypes());
+		loadNodesAndCredentials.addPostProcessor(async () => await this.generateTypes());
 		void this.generateTypes();
 
 		this.initSettings();
@@ -113,9 +115,7 @@ export class FrontendService {
 				apiHost: config.getEnv('diagnostics.config.posthog.apiHost'),
 				apiKey: config.getEnv('diagnostics.config.posthog.apiKey'),
 				autocapture: false,
-				disableSessionRecording: config.getEnv(
-					'diagnostics.config.posthog.disableSessionRecording',
-				),
+				disableSessionRecording: config.getEnv('deployment.type') !== 'cloud',
 				debug: config.getEnv('logs.level') === 'debug',
 			},
 			personalizationSurveyEnabled:
@@ -218,7 +218,9 @@ export class FrontendService {
 		this.writeStaticJSON('credentials', credentials);
 	}
 
-	getSettings(): IN8nUISettings {
+	getSettings(sessionId?: string): IN8nUISettings {
+		void this.internalHooks.onFrontendSettingsAPI(sessionId);
+
 		const restEndpoint = config.getEnv('endpoints.rest');
 
 		// Update all urls, in case `WEBHOOK_URL` was updated by `--tunnel`

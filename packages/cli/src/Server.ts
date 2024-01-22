@@ -1,9 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
-/* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-shadow */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Container, Service } from 'typedi';
@@ -20,14 +17,9 @@ import type { ServeStaticOptions } from 'serve-static';
 import type { FindManyOptions, FindOptionsWhere } from 'typeorm';
 import { Not, In } from 'typeorm';
 
-import { InstanceSettings } from 'n8n-core';
+import { type Class, InstanceSettings } from 'n8n-core';
 
-import type {
-	ICredentialTypes,
-	ExecutionStatus,
-	IExecutionsSummary,
-	IN8nUISettings,
-} from 'n8n-workflow';
+import type { ExecutionStatus, IExecutionsSummary, IN8nUISettings } from 'n8n-workflow';
 import { jsonParse } from 'n8n-workflow';
 
 // @ts-ignore
@@ -36,9 +28,8 @@ import history from 'connect-history-api-fallback';
 
 import config from '@/config';
 import { Queue } from '@/Queue';
-import { getSharedWorkflowIds } from '@/WorkflowHelpers';
 
-import { workflowsController } from '@/workflows/workflows.controller';
+import { WorkflowsController } from '@/workflows/workflows.controller';
 import {
 	EDITOR_UI_DIST_DIR,
 	inDevelopment,
@@ -47,12 +38,12 @@ import {
 	TEMPLATES_DIR,
 } from '@/constants';
 import { credentialsController } from '@/credentials/credentials.controller';
-import type { CurlHelper, ExecutionRequest } from '@/requests';
+import type { CurlHelper } from '@/requests';
+import type { ExecutionRequest } from '@/executions/execution.request';
 import { registerController } from '@/decorators';
 import { AuthController } from '@/controllers/auth.controller';
 import { BinaryDataController } from '@/controllers/binaryData.controller';
 import { DynamicNodeParametersController } from '@/controllers/dynamicNodeParameters.controller';
-import { LdapController } from '@/controllers/ldap.controller';
 import { MeController } from '@/controllers/me.controller';
 import { MFAController } from '@/controllers/mfa.controller';
 import { NodeTypesController } from '@/controllers/nodeTypes.controller';
@@ -65,14 +56,12 @@ import { TranslationController } from '@/controllers/translation.controller';
 import { UsersController } from '@/controllers/users.controller';
 import { WorkflowStatisticsController } from '@/controllers/workflowStatistics.controller';
 import { ExternalSecretsController } from '@/ExternalSecrets/ExternalSecrets.controller.ee';
-import { executionsController } from '@/executions/executions.controller';
+import { ExecutionsController } from '@/executions/executions.controller';
 import { isApiEnabled, loadPublicApiVersions } from '@/PublicApi';
 import type { ICredentialsOverwrite, IDiagnosticInfo, IExecutionsStopData } from '@/Interfaces';
 import { ActiveExecutions } from '@/ActiveExecutions';
 import { CredentialsOverwrites } from '@/CredentialsOverwrites';
-import { CredentialTypes } from '@/CredentialTypes';
 import { LoadNodesAndCredentials } from '@/LoadNodesAndCredentials';
-import { NodeTypes } from '@/NodeTypes';
 import * as ResponseHelper from '@/ResponseHelper';
 import { WaitTracker } from '@/WaitTracker';
 import { toHttpNodeParameters } from '@/CurlConverterHelper';
@@ -81,7 +70,7 @@ import { EventBusControllerEE } from '@/eventbus/eventBus.controller.ee';
 import { LicenseController } from '@/license/license.controller';
 import { setupPushServer, setupPushHandler } from '@/push';
 import { setupAuthMiddlewares } from './middlewares';
-import { handleLdapInit, isLdapEnabled } from './Ldap/helpers';
+import { isLdapEnabled } from './Ldap/helpers';
 import { AbstractServer } from './AbstractServer';
 import { PostHogClient } from './posthog';
 import { eventBus } from './eventbus';
@@ -91,7 +80,6 @@ import { getStatusUsingPreviousExecutionStatusMethod } from './executions/execut
 import { SamlController } from './sso/saml/routes/saml.controller.ee';
 import { SamlService } from './sso/saml/saml.service.ee';
 import { VariablesController } from './environments/variables/variables.controller.ee';
-import { LdapManager } from './Ldap/LdapManager.ee';
 import {
 	isLdapCurrentAuthenticationMethod,
 	isSamlCurrentAuthenticationMethod,
@@ -101,16 +89,10 @@ import { SourceControlController } from '@/environments/sourceControl/sourceCont
 
 import type { ExecutionEntity } from '@db/entities/ExecutionEntity';
 import { ExecutionRepository } from '@db/repositories/execution.repository';
-import { SettingsRepository } from '@db/repositories/settings.repository';
-import { SharedCredentialsRepository } from '@db/repositories/sharedCredentials.repository';
-import { SharedWorkflowRepository } from '@db/repositories/sharedWorkflow.repository';
 import { WorkflowRepository } from '@db/repositories/workflow.repository';
 
-import { MfaService } from './Mfa/mfa.service';
 import { handleMfaDisable, isMfaFeatureEnabled } from './Mfa/helpers';
 import type { FrontendService } from './services/frontend.service';
-import { RoleService } from './services/role.service';
-import { UserService } from './services/user.service';
 import { ActiveWorkflowsController } from './controllers/activeWorkflows.controller';
 import { OrchestrationController } from './controllers/orchestration.controller';
 import { WorkflowHistoryController } from './workflows/workflowHistory/workflowHistory.controller.ee';
@@ -120,7 +102,7 @@ import { RoleController } from './controllers/role.controller';
 import { BadRequestError } from './errors/response-errors/bad-request.error';
 import { NotFoundError } from './errors/response-errors/not-found.error';
 import { MultiMainSetup } from './services/orchestration/main/MultiMainSetup.ee';
-import { PasswordUtility } from './services/password.utility';
+import { WorkflowSharingService } from './workflows/workflowSharing.service';
 
 const exec = promisify(callbackExec);
 
@@ -136,15 +118,7 @@ export class Server extends AbstractServer {
 
 	private loadNodesAndCredentials: LoadNodesAndCredentials;
 
-	private nodeTypes: NodeTypes;
-
-	private credentialTypes: ICredentialTypes;
-
 	private frontendService?: FrontendService;
-
-	private postHog: PostHogClient;
-
-	private collaborationService: CollaborationService;
 
 	constructor() {
 		super('main');
@@ -159,8 +133,6 @@ export class Server extends AbstractServer {
 
 	async start() {
 		this.loadNodesAndCredentials = Container.get(LoadNodesAndCredentials);
-		this.credentialTypes = Container.get(CredentialTypes);
-		this.nodeTypes = Container.get(NodeTypes);
 
 		if (!config.getEnv('endpoints.disableUi')) {
 			// eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -169,7 +141,6 @@ export class Server extends AbstractServer {
 
 		this.activeExecutionsInstance = Container.get(ActiveExecutions);
 		this.waitTracker = Container.get(WaitTracker);
-		this.postHog = Container.get(PostHogClient);
 
 		this.presetCredentialsLoaded = false;
 		this.endpointPresetCredentials = config.getEnv('credentials.overwrite.endpoint');
@@ -238,104 +209,83 @@ export class Server extends AbstractServer {
 				order: { createdAt: 'ASC' },
 				where: {},
 			})
-			.then(async (workflow) =>
-				Container.get(InternalHooks).onServerStarted(diagnosticInfo, workflow?.createdAt),
+			.then(
+				async (workflow) =>
+					await Container.get(InternalHooks).onServerStarted(diagnosticInfo, workflow?.createdAt),
 			);
-		this.collaborationService = Container.get(CollaborationService);
+
+		Container.get(CollaborationService);
 	}
 
 	private async registerControllers(ignoredEndpoints: Readonly<string[]>) {
-		const { app, externalHooks, activeWorkflowRunner, nodeTypes, logger } = this;
+		const { app } = this;
 		setupAuthMiddlewares(app, ignoredEndpoints, this.restEndpoint);
 
-		const internalHooks = Container.get(InternalHooks);
-		const userService = Container.get(UserService);
-		const postHog = this.postHog;
-		const mfaService = Container.get(MfaService);
-
-		const controllers: object[] = [
-			new EventBusController(),
-			new EventBusControllerEE(),
-			Container.get(AuthController),
-			Container.get(LicenseController),
-			Container.get(OAuth1CredentialController),
-			Container.get(OAuth2CredentialController),
-			new OwnerController(
-				config,
-				logger,
-				internalHooks,
-				Container.get(SettingsRepository),
-				userService,
-				Container.get(PasswordUtility),
-				postHog,
-			),
-			Container.get(MeController),
-			Container.get(DynamicNodeParametersController),
-			new NodeTypesController(config, nodeTypes),
-			Container.get(PasswordResetController),
-			Container.get(TagsController),
-			new TranslationController(config, this.credentialTypes),
-			new UsersController(
-				logger,
-				externalHooks,
-				internalHooks,
-				Container.get(SharedCredentialsRepository),
-				Container.get(SharedWorkflowRepository),
-				activeWorkflowRunner,
-				Container.get(RoleService),
-				userService,
-				Container.get(License),
-			),
-			Container.get(SamlController),
-			Container.get(SourceControlController),
-			Container.get(WorkflowStatisticsController),
-			Container.get(ExternalSecretsController),
-			Container.get(OrchestrationController),
-			Container.get(WorkflowHistoryController),
-			Container.get(BinaryDataController),
-			Container.get(VariablesController),
-			new InvitationController(
-				config,
-				logger,
-				internalHooks,
-				externalHooks,
-				Container.get(UserService),
-				Container.get(License),
-				Container.get(PasswordUtility),
-				postHog,
-			),
-			Container.get(VariablesController),
-			Container.get(RoleController),
-			Container.get(ActiveWorkflowsController),
+		const controllers: Array<Class<object>> = [
+			EventBusController,
+			EventBusControllerEE,
+			AuthController,
+			LicenseController,
+			OAuth1CredentialController,
+			OAuth2CredentialController,
+			OwnerController,
+			MeController,
+			DynamicNodeParametersController,
+			NodeTypesController,
+			PasswordResetController,
+			TagsController,
+			TranslationController,
+			UsersController,
+			SamlController,
+			SourceControlController,
+			WorkflowStatisticsController,
+			ExternalSecretsController,
+			OrchestrationController,
+			WorkflowHistoryController,
+			BinaryDataController,
+			VariablesController,
+			InvitationController,
+			VariablesController,
+			RoleController,
+			ActiveWorkflowsController,
+			WorkflowsController,
+			ExecutionsController,
 		];
 
-		if (Container.get(MultiMainSetup).isEnabled) {
-			const { DebugController } = await import('./controllers/debug.controller');
-			controllers.push(Container.get(DebugController));
+		if (process.env.NODE_ENV !== 'production' && Container.get(MultiMainSetup).isEnabled) {
+			const { DebugController } = await import('@/controllers/debug.controller');
+			controllers.push(DebugController);
 		}
 
 		if (isLdapEnabled()) {
-			const { service, sync } = LdapManager.getInstance();
-			controllers.push(new LdapController(service, sync, internalHooks));
+			const { LdapService } = await import('@/Ldap/ldap.service');
+			const { LdapController } = await require('@/Ldap/ldap.controller');
+			await Container.get(LdapService).init();
+			controllers.push(LdapController);
 		}
 
 		if (config.getEnv('nodes.communityPackages.enabled')) {
 			const { CommunityPackagesController } = await import(
 				'@/controllers/communityPackages.controller'
 			);
-			controllers.push(Container.get(CommunityPackagesController));
+			controllers.push(CommunityPackagesController);
 		}
 
 		if (inE2ETests) {
 			const { E2EController } = await import('./controllers/e2e.controller');
-			controllers.push(Container.get(E2EController));
+			controllers.push(E2EController);
 		}
 
 		if (isMfaFeatureEnabled()) {
-			controllers.push(new MFAController(mfaService));
+			controllers.push(MFAController);
 		}
 
-		controllers.forEach((controller) => registerController(app, config, controller));
+		if (!config.getEnv('endpoints.disableUi')) {
+			const { CtaController } = await import('@/controllers/cta.controller');
+			controllers.push(CtaController);
+		}
+
+		controllers.forEach((controller) => registerController(app, controller));
 	}
 
 	async configure(): Promise<void> {
@@ -356,7 +306,7 @@ export class Server extends AbstractServer {
 			await this.externalHooks.run('frontend.settings', [frontendService.getSettings()]);
 		}
 
-		await this.postHog.init();
+		await Container.get(PostHogClient).init();
 
 		const publicApiEndpoint = config.getEnv('publicApi.path');
 		const excludeEndpoints = config.getEnv('security.excludeEndpoints');
@@ -411,18 +361,11 @@ export class Server extends AbstractServer {
 			await Container.get(Queue).init();
 		}
 
-		await handleLdapInit();
-
 		await handleMfaDisable();
 
 		await this.registerControllers(ignoredEndpoints);
 
 		this.app.use(`/${this.restEndpoint}/credentials`, credentialsController);
-
-		// ----------------------------------------
-		// Workflow
-		// ----------------------------------------
-		this.app.use(`/${this.restEndpoint}/workflows`, workflowsController);
 
 		// ----------------------------------------
 		// SAML
@@ -450,28 +393,17 @@ export class Server extends AbstractServer {
 		// ----------------------------------------
 		this.app.post(
 			`/${this.restEndpoint}/curl-to-json`,
-			ResponseHelper.send(
-				async (
-					req: CurlHelper.ToJson,
-					res: express.Response,
-				): Promise<{ [key: string]: string }> => {
-					const curlCommand = req.body.curlCommand ?? '';
+			ResponseHelper.send(async (req: CurlHelper.ToJson) => {
+				const curlCommand = req.body.curlCommand ?? '';
 
-					try {
-						const parameters = toHttpNodeParameters(curlCommand);
-						return ResponseHelper.flattenObject(parameters, 'parameters');
-					} catch (e) {
-						throw new BadRequestError('Invalid cURL command');
-					}
-				},
-			),
+				try {
+					const parameters = toHttpNodeParameters(curlCommand);
+					return ResponseHelper.flattenObject(parameters, 'parameters');
+				} catch (e) {
+					throw new BadRequestError('Invalid cURL command');
+				}
+			}),
 		);
-
-		// ----------------------------------------
-		// Executions
-		// ----------------------------------------
-
-		this.app.use(`/${this.restEndpoint}/executions`, executionsController);
 
 		// ----------------------------------------
 		// Executing Workflows
@@ -510,7 +442,9 @@ export class Server extends AbstractServer {
 							},
 						};
 
-						const sharedWorkflowIds = await getSharedWorkflowIds(req.user);
+						const sharedWorkflowIds = await Container.get(
+							WorkflowSharingService,
+						).getSharedWorkflowIds(req.user);
 
 						if (!sharedWorkflowIds.length) return [];
 
@@ -558,7 +492,9 @@ export class Server extends AbstractServer {
 
 					const filter = req.query.filter ? jsonParse<any>(req.query.filter) : {};
 
-					const sharedWorkflowIds = await getSharedWorkflowIds(req.user);
+					const sharedWorkflowIds = await Container.get(
+						WorkflowSharingService,
+					).getSharedWorkflowIds(req.user);
 
 					for (const data of executingWorkflows) {
 						if (
@@ -591,7 +527,9 @@ export class Server extends AbstractServer {
 			ResponseHelper.send(async (req: ExecutionRequest.Stop): Promise<IExecutionsStopData> => {
 				const { id: executionId } = req.params;
 
-				const sharedWorkflowIds = await getSharedWorkflowIds(req.user);
+				const sharedWorkflowIds = await Container.get(WorkflowSharingService).getSharedWorkflowIds(
+					req.user,
+				);
 
 				if (!sharedWorkflowIds.length) {
 					throw new NotFoundError('Execution not found');
@@ -687,9 +625,7 @@ export class Server extends AbstractServer {
 		// Returns all the available timezones
 		this.app.get(
 			`/${this.restEndpoint}/options/timezones`,
-			ResponseHelper.send(async (req: express.Request, res: express.Response): Promise<object> => {
-				return timezones;
-			}),
+			ResponseHelper.send(async () => timezones),
 		);
 
 		// ----------------------------------------
@@ -701,13 +637,8 @@ export class Server extends AbstractServer {
 			this.app.get(
 				`/${this.restEndpoint}/settings`,
 				ResponseHelper.send(
-					async (req: express.Request, res: express.Response): Promise<IN8nUISettings> => {
-						void Container.get(InternalHooks).onFrontendSettingsAPI(
-							req.headers.sessionid as string,
-						);
-
-						return frontendService.getSettings();
-					},
+					async (req: express.Request): Promise<IN8nUISettings> =>
+						frontendService.getSettings(req.headers.sessionid as string),
 				),
 			);
 		}
@@ -766,6 +697,7 @@ export class Server extends AbstractServer {
 			};
 
 			const serveIcons: express.RequestHandler = async (req, res) => {
+				// eslint-disable-next-line prefer-const
 				let { scope, packageName } = req.params;
 				if (scope) packageName = `@${scope}/${packageName}`;
 				const filePath = this.loadNodesAndCredentials.resolveIcon(packageName, req.originalUrl);

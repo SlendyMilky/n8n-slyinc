@@ -1,6 +1,4 @@
 import { Container, Service } from 'typedi';
-import type { EntityManager, FindManyOptions, FindOneOptions, FindOptionsWhere } from 'typeorm';
-import { In } from 'typeorm';
 import { User } from '@db/entities/User';
 import type { IUserSettings } from 'n8n-workflow';
 import { UserRepository } from '@db/repositories/user.repository';
@@ -29,36 +27,8 @@ export class UserService {
 		private readonly urlService: UrlService,
 	) {}
 
-	async findOne(options: FindOneOptions<User>) {
-		return this.userRepository.findOne({ relations: ['globalRole'], ...options });
-	}
-
-	async findOneOrFail(options: FindOneOptions<User>) {
-		return this.userRepository.findOneOrFail({ relations: ['globalRole'], ...options });
-	}
-
-	async findMany(options: FindManyOptions<User>) {
-		return this.userRepository.find(options);
-	}
-
-	async findOneBy(options: FindOptionsWhere<User>) {
-		return this.userRepository.findOneBy(options);
-	}
-
-	create(data: Partial<User>) {
-		return this.userRepository.create(data);
-	}
-
-	async save(user: Partial<User>) {
-		return this.userRepository.save(user);
-	}
-
 	async update(userId: string, data: Partial<User>) {
-		return this.userRepository.update(userId, data);
-	}
-
-	async getByIds(transaction: EntityManager, ids: string[]) {
-		return transaction.find(User, { where: { id: In(ids) } });
+		return await this.userRepository.update(userId, data);
 	}
 
 	getManager() {
@@ -68,7 +38,7 @@ export class UserService {
 	async updateSettings(userId: string, newSettings: Partial<IUserSettings>) {
 		const { settings } = await this.userRepository.findOneOrFail({ where: { id: userId } });
 
-		return this.userRepository.update(userId, { settings: { ...settings, ...newSettings } });
+		return await this.userRepository.update(userId, { settings: { ...settings, ...newSettings } });
 	}
 
 	generatePasswordResetToken(user: User, expiresIn = '20m') {
@@ -186,7 +156,7 @@ export class UserService {
 			resolve(publicUser);
 		});
 
-		return Promise.race([fetchPromise, timeoutPromise]);
+		return await Promise.race([fetchPromise, timeoutPromise]);
 	}
 
 	private async sendEmails(
@@ -196,7 +166,7 @@ export class UserService {
 	) {
 		const domain = this.urlService.getInstanceBaseUrl();
 
-		return Promise.all(
+		return await Promise.all(
 			Object.entries(toInviteUsers).map(async ([email, id]) => {
 				const inviteAcceptUrl = `${domain}/signup?inviterId=${owner.id}&inviteeId=${id}`;
 				const invitedUser: UserRequest.InviteResponse = {
@@ -257,12 +227,9 @@ export class UserService {
 	async inviteUsers(owner: User, attributes: Array<{ email: string; role: 'member' | 'admin' }>) {
 		const memberRole = await this.roleService.findGlobalMemberRole();
 		const adminRole = await this.roleService.findGlobalAdminRole();
+		const emails = attributes.map(({ email }) => email);
 
-		const existingUsers = await this.findMany({
-			where: { email: In(attributes.map(({ email }) => email)) },
-			relations: ['globalRole'],
-			select: ['email', 'password', 'id'],
-		});
+		const existingUsers = await this.userRepository.findManyByEmail(emails);
 
 		const existUsersEmails = existingUsers.map((user) => user.email);
 
@@ -279,18 +246,19 @@ export class UserService {
 		);
 
 		try {
-			await this.getManager().transaction(async (transactionManager) =>
-				Promise.all(
-					toCreateUsers.map(async ({ email, role }) => {
-						const newUser = Object.assign(new User(), {
-							email,
-							globalRole: role === 'member' ? memberRole : adminRole,
-						});
-						const savedUser = await transactionManager.save<User>(newUser);
-						createdUsers.set(email, savedUser.id);
-						return savedUser;
-					}),
-				),
+			await this.getManager().transaction(
+				async (transactionManager) =>
+					await Promise.all(
+						toCreateUsers.map(async ({ email, role }) => {
+							const newUser = Object.assign(new User(), {
+								email,
+								globalRole: role === 'member' ? memberRole : adminRole,
+							});
+							const savedUser = await transactionManager.save<User>(newUser);
+							createdUsers.set(email, savedUser.id);
+							return savedUser;
+						}),
+					),
 			);
 		} catch (error) {
 			ErrorReporter.error(error);
@@ -303,7 +271,7 @@ export class UserService {
 		const usersInvited = await this.sendEmails(
 			owner,
 			Object.fromEntries(createdUsers),
-			toCreateUsers[0].role, // same role for all invited users
+			attributes[0].role, // same role for all invited users
 		);
 
 		return { usersInvited, usersCreated: toCreateUsers.map(({ email }) => email) };

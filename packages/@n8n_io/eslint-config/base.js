@@ -336,6 +336,11 @@ const config = (module.exports = {
 			},
 		],
 
+		/**
+		 * https://github.com/typescript-eslint/typescript-eslint/blob/main/packages/eslint-plugin/docs/rules/return-await.md
+		 */
+		'@typescript-eslint/return-await': ['error', 'always'],
+
 		// ----------------------------------
 		//       eslint-plugin-import
 		// ----------------------------------
@@ -473,7 +478,7 @@ const config = (module.exports = {
 			},
 		},
 		{
-			files: ['test/**/*.ts', 'src/__tests__/*.ts'],
+			files: ['test/**/*.ts', '**/__tests__/*.ts'],
 			rules: {
 				'n8n-local-rules/no-plain-errors': 'off',
 				'n8n-local-rules/no-skipped-tests':
